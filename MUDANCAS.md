@@ -170,3 +170,56 @@ Ecoavam o "Gélido", que virou "Giz".
 - `npm run build` — limpo.
 - Bundle publicado varrido: marcadores da conta e das sinergias novas presentes,
   os antigos zerados.
+
+---
+
+# Rodada 3 — o canvas nunca era dimensionado
+
+Bug reportado com foto: no celular o mapa aparecia com zoom enorme, mostrando
+só o canto superior esquerdo do tabuleiro.
+
+## Causa
+
+`game-screen.tsx` tem um `return` antecipado enquanto `hud` é `null`
+("Abrindo o caderno…"). Na primeira renderização o canvas **não está no DOM**.
+O `useEffect` que definia `canvas.width/height` lia `canvasRef.current`,
+encontrava `null` e pulava o bloco inteiro. O `setHud` seguinte montava o
+canvas — mas o efeito tem dependência `[map.id]` e nunca mais rodava.
+
+O canvas ficava no padrão do HTML, **300×150**, e o jogo desenhava 300×150 de um
+campo de 832×576, esticado para preencher a caixa. Daí o zoom e a leve distorção
+vertical.
+
+**Bug pré-existente** — não veio do redesenho. Ficou gritante porque o novo
+tabuleiro tem muito mais o que enxergar.
+
+## Como foi diagnosticado
+
+Não por leitura otimista: reproduzi. `ferramentas/harness/bug.ts` recria o
+ciclo de vida do React passo a passo (canvas ausente → efeito roda → canvas
+monta) e renderiza o `render.ts` real num viewport de 412px. A imagem saiu
+idêntica à foto do bug, com bitmap 300×150 confirmado. A mesma página renderiza
+o caminho corrigido logo abaixo, para comparação.
+
+## Correção
+
+- `fitCanvas()` passou a ser aplicado por **ref de callback**, que dispara
+  exatamente quando o elemento entra no DOM — não importa em que renderização
+  isso aconteça.
+- O laço rAF confere o tamanho **a cada quadro** e se autocorrige. É uma
+  comparação de inteiros por quadro, e cobre também a mudança de
+  `devicePixelRatio` ao girar a tela (mexer em `width`/`height` zera a
+  transformação do contexto).
+
+A autocorreção é a rede de segurança: mesmo que alguém mude a ordem de
+renderização de novo, o bug não volta.
+
+## Verificação
+
+Bundle publicado contém a função e a guarda:
+
+```js
+function _t(e){let t=Math.min(2,window.devicePixelRatio||1),n=Math.round(832*t),r=Math.round(576*t);
+  (e.width!==n||e.height!==r)&&(e.width=n,e.height=r),e.getContext(`2d`)?.setTransform(t,0,0,t,0,0)}
+n.width!==Math.round(832*Math.min(2,window.devicePixelRatio||1))&&_t(n)
+```
