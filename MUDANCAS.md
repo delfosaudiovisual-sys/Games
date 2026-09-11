@@ -97,3 +97,76 @@ diff real está no histórico git da Macaly. Resumo do que mudou em cada um:
 - `npx vitest run` — 16 testes, todos passando.
 - Harness visual — partida, primeiro contato, modo construção, celular 390px e
   teste de silhueta chapada.
+
+---
+
+# Rodada 2 — fechamento
+
+## Balanceamento: eu estava errado
+
+Eu tinha alertado que as plataformas deixariam o jogo mais difícil. Medi em vez
+de adivinhar: `__tests__/sim.test.ts` roda o motor **sem renderização**, com um
+jogador automático, e compara plataformas contra a colocação livre antiga.
+
+| mapa | modo | onda | vidas | torres | vitórias |
+| --- | --- | --- | --- | --- | --- |
+| A Margem | plataformas | 20 | 20/20 | 17 | 5/5 |
+| A Margem | livre (antigo) | 20 | 20/20 | 75 | 5/5 |
+| A Página Rasgada | plataformas | 20 | 18/18 | 15 | 5/5 |
+| A Página Rasgada | livre (antigo) | 20 | 18/18 | 74 | 5/5 |
+| O Tinteiro | plataformas | 20 | 15/15 | 16 | 5/5 |
+| O Tinteiro | livre (antigo) | 20 | 15,6/15 | 71 | 5/5 |
+
+**As plataformas não pioraram nada.** Concentrar o ouro em ~16 posições, todas
+coladas na estrada, compensa exatamente a perda de quantidade.
+
+O que a medição expôs de verdade é outra coisa: **a campanha é fácil demais**.
+Um jogador automático burro — cicla tipos de torre, sempre melhora a mais barata
+— vence os três mapas de vida cheia, inclusive "O Tinteiro", que deveria ser
+brutal. Isso já era verdade antes da mudança, então não é regressão; é dívida de
+design que fica anotada.
+
+Ressalvas honestas da simulação: o autômato gasta cada moeda no instante em que
+ela entra e nunca erra de economia, o que um humano não faz; em compensação ele
+posiciona pior. Serve como **piso** de poder, não como modelo de jogador real.
+
+O teste é opt-in (`SIM=1 npx vitest run`) porque leva ~20s.
+
+## Conta e progresso sincronizado
+
+- `convex/schema.ts` — entram `authTables` (faltavam: sem elas o login por
+  código de e-mail não persistia) e a tabela `saves` por usuário.
+- `convex/saves.ts` — `load` e `store`, ambos recusando sem sessão.
+- `src/game/save.ts` — `mergeSaves` e `parseSave`.
+- `src/components/prisma/conta.tsx` — hook de espelhamento e login por código.
+
+**A regra de fusão é a parte delicada.** Prismas são moeda que se gasta, então
+somar os dois lados duplicaria dinheiro: um rank comprado no celular sairia de
+graça se juntássemos os prismas do computador. A economia (prismas em caixa +
+ranks da árvore) vem **inteira do lado mais avançado**, medido por
+`prismas + skillSpent`. O que não é econômico — mapas, conquistas, recordes,
+contadores — une pelo melhor dos dois. Conquista herdada do outro lado vem sem
+o prêmio em prismas, de propósito: é o lado conservador do trade-off.
+
+`__tests__/fusao-de-save.test.ts` cobre isso em 5 casos, incluindo o de não
+duplicar moeda e o de comutatividade.
+
+O localStorage continua sendo a fonte imediata — o jogo nunca espera a rede para
+começar. A conta é espelho durável, com fusão única ao vincular e envio com
+respiro de 1,5s depois.
+
+## Ajuste
+
+Sinergias "Tempestade Gélida" e "Mira Congelada" → "Pó Condutor" e "Mira Firme".
+Ecoavam o "Gélido", que virou "Giz".
+
+## Verificação
+
+- `.sandbox/check-errors` — TypeScript e Tailwind limpos.
+- `.sandbox/deploy-convex-app` — "Live deployed. The public Convex contract is
+  backward-compatible." 9 tabelas no deployment.
+- `npx convex run saves:load '{}'` → `null`; `saves:store` → `false` (sem sessão).
+- `npx vitest run` — 25 testes passando, 1 opt-in pulado.
+- `npm run build` — limpo.
+- Bundle publicado varrido: marcadores da conta e das sinergias novas presentes,
+  os antigos zerados.
