@@ -223,3 +223,89 @@ function _t(e){let t=Math.min(2,window.devicePixelRatio||1),n=Math.round(832*t),
   (e.width!==n||e.height!==r)&&(e.width=n,e.height=r),e.getContext(`2d`)?.setTransform(t,0,0,t,0,0)}
 n.width!==Math.round(832*Math.min(2,window.devicePixelRatio||1))&&_t(n)
 ```
+
+---
+
+# Rodada 4 — animações de história na abertura de cada capítulo
+
+Cada mapa da campanha abre com uma cinemática desenhada no mesmo canvas e no
+mesmo traço à mão do jogo. Roda **uma vez**, antes da primeira partida
+daquele mapa, e pode ser revista pelo botão 📖 no menu.
+
+## O beat é um estado, não um delta
+
+A decisão que sustenta o arquivo inteiro:
+
+```ts
+export interface Beat {
+  dur: number
+  texto: string
+  draw: (ctx, t: number, p: Palco, tempo: number) => void
+}
+```
+
+`draw` recebe o progresso `t` do beat e desenha **a cena inteira naquele
+instante** — nunca "o que mudou desde o quadro anterior". O player então
+redesenha todos os beats anteriores com `t = 1` e só o atual com o `t` dele.
+
+Três coisas caem de graça disso:
+
+- **acúmulo sem estado guardado** — a tinta que o Ato I espalhou no beat 1
+  continua lá no beat 4 porque é redesenhada, não porque ficou num buffer;
+- **rewind** — tocar para trás é só passar um `tempo` menor;
+- **nada para dessincronizar** — não existe estado mutável entre quadros que
+  possa divergir do tempo da cena.
+
+O custo é redesenhar tudo por quadro. Em 832×576 com formas vetoriais isso é
+barato; o que **não** é barato é `paperGrain`, que varre cada pixel — então o
+papel é rasterizado uma vez em `montarPalco()` e depois só blitado.
+
+## As três cenas
+
+Cada ato tem 4 beats e dura ~15s.
+
+| Ato | Mapa | O que acontece |
+|---|---|---|
+| I | A Margem | a tinta escorre pela trilha **real do mapa**, e as plataformas se rascunham sobre ela |
+| II | A Página Rasgada | a página vira, os desenhos estão cinzas e mortos, a Mancha engole um deles — e **abre olhos** |
+| III | O Tinteiro | o tinteiro tomba, a tinta corre até o Prisma cercado, e a cor volta inundando por cima do nanquim |
+
+A trilha do Ato I não é um desenho decorativo: `montarPalco` lê o `MapDef` e
+constrói a `Trilha` a partir do caminho que o jogador vai defender. A abertura
+é literalmente o mapa se desenhando.
+
+## Defeitos encontrados por quadro-chave
+
+Renderizei tiras de quadros-chave dos três atos em Chromium headless
+(`ferramentas/harness/captura-cena.mjs`) e corrigi seis coisas que eu não
+teria visto lendo o código:
+
+1. legenda do Ato III **cortada** na largura → `quebrar()` passou a quebrar em
+   duas linhas;
+2. a inundação de cor estourava em branco com
+   `globalCompositeOperation = 'lighter'` → trocada por redesenhar a estrada em
+   cor espectral dentro de um `clip` que cresce;
+3. o cabeçalho do capítulo ficava atravessado na estrada → agora ele sai em
+   fade no fim do beat 1;
+4. a gota de tinta era pequena demais para ler como gota;
+5. o Prisma morto precisava de linhas de faceta para não virar um polígono;
+6. o Prisma desaparecia atrás da estrada colorida → redesenhado por cima.
+
+## Não repetir o bug da rodada 3
+
+`cutscene.tsx` já nasceu com o padrão de **ref de callback** e com a
+autocorreção de tamanho por quadro. O bug do canvas 300×150 não podia voltar
+por uma tela nova.
+
+## Arquivos
+
+- `src/game/cutscene.ts` — palco, trilha, cenas, primitivas de animação
+- `src/components/prisma/cutscene.tsx` — player (rAF, toque/Espaço avança,
+  Esc/"Pular ›" sai)
+- `seenIntros` no save, com **união** na fusão de saves: quem já viu num
+  aparelho não vê de novo no outro
+
+## Verificação
+
+`.sandbox/check-errors` limpo (TypeScript e CSS), `npx vitest run` com 25
+testes passando, `npm run build` ok. Balanceamento em `content.ts` intocado.
