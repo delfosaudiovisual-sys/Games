@@ -1,0 +1,129 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>prova de layout</title>
+<link rel="stylesheet" href="tokens.css"><link rel="stylesheet" href="layout.css">
+<style>
+  /* utilitárias do Tailwind usadas no markup, recriadas só para a prova */
+  .row{display:flex;align-items:center}.gap2{gap:8px}.gap1{gap:4px}
+  .px3{padding:0 12px}.py2{padding:6px 0}.p2{padding:8px}
+  .mla{margin-left:auto}.f1{flex:1}.mw0{min-width:0}.shrink0{flex-shrink:0}
+  .t10{font-size:10px}.t11{font-size:11px}.t12{font-size:12px}.t13{font-size:13px}
+  .b{font-weight:700}.dim{color:hsl(var(--ink-dim))}.soft{color:hsl(var(--ink-soft))}
+  .amber{color:hsl(var(--amber))}.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .glyph{width:36px;height:36px;border-radius:10px;flex-shrink:0;
+         background:linear-gradient(135deg,hsl(var(--prisma)),hsl(var(--violet)))}
+  .ico{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:18px}
+  
+</style></head><body>
+<div class="pr-shell pr-stage">
+  <header class="pr-rail pr-topbar">
+    <button class="pr-btn t12 b shrink0" style="padding:7px 9px">←<span class="pr-topbar-label"> Sair</span></button>
+    <span class="pr-chip row gap1 t12 b shrink0" style="padding:5px 9px">💛 20<span class="dim pr-of">/20</span></span>
+    <span class="pr-chip row gap1 t12 b amber shrink0" style="padding:5px 9px">🪙 280</span>
+    <span class="pr-chip row gap1 t12 b shrink0" style="padding:5px 9px">🌊 3<span class="dim pr-of">/20</span></span>
+    <span class="pr-spacer row gap1 shrink0">
+      <button class="pr-btn pr-speed-one t12 b" style="padding:7px 9px">1×</button>
+      <span class="pr-chip pr-speed-all gap1" style="padding:3px"><b class="t11" style="padding:3px 7px">1×</b><b class="t11 dim" style="padding:3px 7px">2×</b><b class="t11 dim" style="padding:3px 7px">3×</b></span>
+      <button class="pr-btn t12" style="padding:7px 9px">❚❚</button>
+    </span>
+  </header>
+
+  <div class="pr-body">
+    <div class="pr-field-box">
+      <canvas id="cv" class="pr-canvas" width="1664" height="1152"></canvas>
+      <div class="pr-hint pr-hint-float t13 b" style="padding:8px 14px">2 · Toque numa plataforma livre</div>
+    </div>
+
+    <div class="pr-dock" id="dock">
+      <div class="pr-panel p2">
+        <div class="pr-acts">
+          <button class="pr-btn pr-btn-hot pr-wave t13 b" style="padding:10px 8px">Chamar onda 4 <span class="t11">+18 🪙</span></button>
+          <button class="pr-btn pr-act">☄️<b class="pr-act-cost amber">40</b></button>
+          <button class="pr-btn pr-act">❄️<b class="pr-act-cost amber">55</b></button>
+          <button class="pr-btn pr-act">🩹<b class="pr-act-cost amber">70</b></button>
+        </div>
+        <div class="pr-bar" style="margin-top:6px"><i style="width:62%"></i></div>
+      </div>
+
+      <div class="pr-panel p2" id="build">
+        <div class="row gap2" style="margin-bottom:6px">
+          <b class="t13">Construir</b><span class="t11 dim pr-dock-sub">toque, depois numa plataforma</span>
+        </div>
+        <div class="pr-towers" id="towers"></div>
+      </div>
+      <div class="pr-panel pr-legend p2">
+        <div class="t10 dim" style="margin-bottom:6px;text-transform:uppercase;letter-spacing:.1em">O campo</div>
+        <div class="t11 soft">
+          <span class="row gap2" style="margin-bottom:4px"><i style="display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid rgba(139,215,232,.6);background:rgba(139,215,232,.3);flex-shrink:0"></i> plataforma: é onde dá para construir</span>
+          <span class="row gap2" style="margin-bottom:4px"><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:hsl(var(--sand));flex-shrink:0"></i> a tinta escorre por aqui, até o Prisma</span>
+          <span class="row gap2"><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:hsl(var(--ink-dim)/.5);flex-shrink:0"></i> pedra: bloqueado para os dois lados</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const TORRES = [
+    ['Lápis','Tiro rápido','Barata e constante. Boa para começar.',60],
+    ['Giz','Controle','Pouco dano, muita lentidão.',90],
+    ['Guache','Morteiro','Explosões em área. Não pega voadores.',130],
+    ['Lupa','Precisão','Alcance imenso e dano cirúrgico.',200],
+    ['Clipe','Cadeia','Raios que saltam entre inimigos.',150],
+    ['Solvente','Veneno','Dano ao longo do tempo.',110],
+    ['Luminária','Suporte','Fortalece as torres vizinhas.',140],
+  ]
+  const n = Number(new URLSearchParams(location.search).get('n') || 7)
+  document.getElementById('towers').innerHTML = TORRES.slice(0, n).map(([nome, papel, tag, custo], i) => `
+    <button class="pr-btn pr-tower">
+      <span class="glyph"></span>
+      <span class="pr-tower-body">
+        <span class="pr-tower-name">${nome}<span class="t10 dim pr-tower-key"> [${i + 1}]</span></span>
+        <span class="t11 soft trunc pr-tower-tag">${tag}</span>
+        <span class="pr-tower-cost amber">${custo} 🪙</span>
+      </span>
+    </button>`).join('')
+
+  // desenha o campo com a mesma proporção, para conferir que nada estica
+  const cv = document.getElementById('cv'), g = cv.getContext('2d')
+  g.setTransform(2, 0, 0, 2, 0, 0)
+  g.fillStyle = '#e8ddc5'; g.fillRect(0, 0, 832, 576)
+  g.strokeStyle = 'rgba(43,36,25,0.18)'; g.lineWidth = 1
+  for (let c = 0; c <= 13; c++) { g.beginPath(); g.moveTo(c * 64, 0); g.lineTo(c * 64, 576); g.stroke() }
+  for (let r = 0; r <= 9; r++) { g.beginPath(); g.moveTo(0, r * 64); g.lineTo(832, r * 64); g.stroke() }
+  g.strokeStyle = '#2b2419'; g.lineWidth = 3
+  g.strokeRect(1.5, 1.5, 829, 573)
+  // círculo: se o canvas esticar, ele vira elipse — é o teste visual
+  g.beginPath(); g.arc(416, 288, 240, 0, Math.PI * 2); g.stroke()
+  g.fillStyle = '#2b2419'; g.font = "700 40px Inter, sans-serif"; g.textAlign = 'center'
+  g.fillText('832 × 576', 416, 300)
+
+  window.__medida = () => {
+    const doc = document.scrollingElement
+    const r = cv.getBoundingClientRect()
+    const d = document.getElementById('dock').getBoundingClientRect()
+    const t = document.querySelector('.pr-tower').getBoundingClientRect()
+    const dock = document.getElementById('dock')
+    return {
+      vp: [innerWidth, innerHeight],
+      rolagemPagina: doc.scrollHeight - doc.clientHeight,
+      canvas: [Math.round(r.width), Math.round(r.height)],
+      proporcao: +(r.width / r.height).toFixed(3),
+      celula: +(r.width / 13).toFixed(1),
+      docaVisivel: [Math.round(d.width), Math.round(d.height)],
+      rolagemDoca: dock.scrollHeight - dock.clientHeight,
+      cartao: [Math.round(t.width), Math.round(t.height)],
+      barraCabe: (() => {
+        const bar = document.querySelector('.pr-topbar')
+        const kids = [...bar.children]
+        const last = kids[kids.length - 1].getBoundingClientRect()
+        return last.right <= bar.getBoundingClientRect().right + 0.5 && bar.scrollWidth <= bar.clientWidth + 0.5
+      })(),
+      ultimaTorreVisivel: (() => {
+        const all = [...document.querySelectorAll('.pr-tower')]
+        const last = all[all.length - 1].getBoundingClientRect()
+        return last.bottom <= innerHeight + 0.5 && last.bottom <= d.bottom + 0.5
+      })(),
+    }
+  }
+  window.__ready = true
+</script></body></html>

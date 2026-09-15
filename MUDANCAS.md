@@ -309,3 +309,162 @@ por uma tela nova.
 
 `.sandbox/check-errors` limpo (TypeScript e CSS), `npx vitest run` com 25
 testes passando, `npm run build` ok. Balanceamento em `content.ts` intocado.
+
+---
+
+# Rodada 5 — interface de celular numa tela, e arsenal liberado por onda
+
+Duas coisas: a tela de jogo deixou de rolar, e as sete torres deixaram de
+aparecer todas na primeira onda.
+
+## Retrato ou paisagem? Os dois — e o problema não era nenhum dos dois
+
+A pergunta natural é qual orientação é melhor. **A paisagem dá um mapa maior**,
+e isso é medido: célula de 35,1px contra 28,8px no retrato, 22% a mais. Mas
+não era isso que fazia doer.
+
+O layout antigo era uma coluna única abaixo de `lg` (1024px). No celular, para
+chegar na lista de torres você passava por: banner "gire o celular", bolha de
+dica, canvas, legenda de três itens, botão de chamar onda, barra de preparo,
+fichas de inimigos, três cartões de habilidade e a barra de energia — e só
+então "Construir", com as sete torres em **uma por linha**. A lista de
+personagens estava a uma tela e meia de distância da mão.
+
+Então a resposta não é escolher uma orientação, é **as duas caberem numa tela**:
+
+```
+retrato                        paisagem / desktop
+┌─────────────────┐            ┌──────────────┬────────┐
+│ barra           │            │ barra        │        │
+├─────────────────┤            ├──────────────┤ trilho │
+│     campo       │            │              │ (ações │
+├─────────────────┤            │    campo     │ + tor- │
+│ ações           │            │              │  res)  │
+│ torres          │            │              │        │
+│ legenda         │            └──────────────┴────────┘
+└─────────────────┘
+```
+
+`.pr-shell` tem `height: 100dvh` e `overflow: hidden`; `.pr-field-box` não
+cresce nem estica; `.pr-dock` fica com a sobra e rola **por dentro**, se
+precisar. A página nunca rola.
+
+## Medido, não estimado
+
+`ferramentas/harness-ui/` é uma página que carrega **o CSS que foi publicado**
+(conferido: md5 `269dc3bd…` ignorando comentários, idêntico ao fim de
+`src/styles.css`) com um esqueleto fiel do DOM, e mede em seis viewports:
+
+| viewport | campo | célula | rolagem de página | rolagem da doca | 7 torres visíveis |
+|---|---|---|---|---|---|
+| 390×844 retrato | 374×259 | 28,8 | 0 | 0 | sim |
+| 360×640 retrato | 344×238 | 26,5 | 0 | 0 | sim |
+| 844×390 paisagem | 456×316 | 35,1 | 0 | 0 | sim |
+| 820×1180 tablet | 804×557 | 61,8 | 0 | 0 | sim |
+| 1440×900 desktop | 1036×717 | 79,7 | 0 | 0 | sim |
+
+Proporção do campo: 1.444 em todos, ou seja nunca esticou.
+
+As quatro correções abaixo só existem porque a medição as encontrou — nenhuma
+era visível lendo o código:
+
+1. **lista vertical estourava 359px na paisagem.** Virou ladrilho (glifo, nome,
+   preço) num grid que se reflui: 4 colunas no retrato, 4 no trilho, 1 linha
+   com descrição só no desktop.
+2. **o emoji do preço caía sozinho numa segunda linha** e esticava a fileira
+   inteira do grid. Nome e preço empilhados, `white-space: nowrap`.
+3. **"← Sair" quebrava em duas linhas** e empurrava a pausa para fora da tela.
+   A barra não quebra mais, o rótulo sai abaixo de 560px, a velocidade vira uma
+   casa que cicla 1×→2×→3× e o "/20" sai abaixo de 400px.
+4. **o trilho ainda estourava 57px na paisagem.** Alargar o trilho para 42vw
+   resolveu sem custo: ali o campo é limitado pela **altura**, então dar
+   largura ao trilho não tira um pixel do mapa.
+
+## A largura do campo é escrita como largura, não como altura
+
+```css
+width: min(100%, calc((100dvh - 190px) * 832 / 576));
+```
+
+`max-height` sobre um elemento substituído depende de o navegador aplicar a
+tabela de restrições preservando a proporção intrínseca. Escrever o limite de
+altura **como a largura equivalente** não depende disso: a proporção sai exata
+em qualquer viewport, e foi o que os 1.444 confirmaram.
+
+O minificador dobra isso em `min(100%,144.444dvh - 274.444px)` e **descarta o
+fallback em vh**. Daí o `max-width: 100%`: num navegador sem dvh a `width`
+inteira seria inválida e o canvas assumiria o tamanho do bitmap (1664px),
+estourando a tela; com o max-width ele volta para a largura da caixa e o
+`aspect-ratio` mantém a proporção.
+
+## O banner "gire o celular" saiu
+
+Pedir para o jogador consertar o layout não é layout. O retrato funciona; a
+paisagem dá um mapa maior, e isso está dito uma vez na abertura, não em toda
+tela.
+
+## Arsenal liberado por onda
+
+Sete torres na primeira onda é a razão pela qual a lista era enorme **e a
+escolha era vazia**: um jogador novo não tem como saber qual das sete resolve
+um problema que ele ainda não viu. Agora cada torre entra na onda em que a
+ameaça que ela responde aparece (`src/game/unlock.ts`):
+
+| onda | torre | por quê ali |
+|---|---|---|
+| 0 | Lápis, Giz | dano e controle: o mínimo para haver decisão |
+| 3 | Guache | os Riscos passam a vir em bando na onda 3-4 |
+| 5 | Lupa | as Rasuras voam na onda 6, e o Guache não as pega |
+| 8 | Clipe | aglomeração e Selos |
+| 11 | Solvente | o Mata-Borrão cura mais rápido do que se mata |
+| 14 | Luminária | economia e suporte, quando o tabuleiro está cheio |
+
+O desbloqueio é **permanente** e derivado de `bestWave` — nenhum campo novo de
+progresso, nenhuma migração: quem já chegou na onda 14 começa a próxima partida
+com tudo na mão. A ordem do array é a ordem dos atalhos 1..7, e ela não muda
+conforme as torres entram.
+
+**Tutorial de cada uma.** A estreia abre um cartão com glifo, papel e uma
+frase que diz *quando* usar, não o que ela faz. O cartão só interrompe no
+**preparo**, nunca no meio do combate, e só uma vez (`seenTowerTips` no save,
+com união na fusão entre aparelhos). As duas iniciais são ensinadas pela
+abertura da partida, porque dois modais em sequência na onda 1 seriam ruído em
+cima de ruído. O códice mostra as trancadas com a onda de cada uma, e a dica
+fica lá para sempre.
+
+## O que os testes garantem
+
+`__tests__/desbloqueio.test.ts` (10 testes) deriva as ameaças de
+`CAMPAIGN_WAVES`, não de números escritos no teste. O mais útil:
+
+> **dá uma resposta aos voadores antes de eles chegarem** — encontra a primeira
+> onda com inimigo voador, pega o arsenal liberado até a onda anterior e exige
+> que pelo menos uma torre dali atire **e** acerte quem voa.
+
+Se alguém antecipar as Rasuras ou atrasar a Lupa, é esse teste que quebra.
+Também: o ouro inicial de todo mapa compra alguma torre liberada, a escada não
+anda para trás, o conjunto só cresce, e tudo libera dentro da campanha.
+
+## Balanceamento: continua ganhável
+
+A simulação agora **respeita o desbloqueio** — o jogador automático só constrói
+o que a onda liberou, como um jogador de primeira viagem, que é o caso pior.
+
+```
+ mapa               modo     onda   vidas      torres  vitorias
+ A Margem           PLATAF   20.0   18.0/20    17.0   3/3
+ A Página Rasgada   PLATAF   20.0   18.0/18    15.0   3/3
+ O Tinteiro         PLATAF   20.0   15.0/15    16.0   3/3
+```
+
+3/3 vitórias em todos os mapas nos dois modos. A Margem passou a perder duas
+vidas onde antes fechava intacta — direção certa, já que a campanha estava
+fácil demais.
+
+## Verificação
+
+`.sandbox/check-errors` limpo, 35 testes passando, `npm run build` ok, e o
+bundle publicado confere: `pr-shell`, `pr-field-box`, `pr-towers`, `pr-topbar`,
+`pr-legend`, o trilho de 42vw, `aspect-ratio:832/576`, `seenTowerTips`, o
+cartão de estreia — e zero ocorrências de "Gire o celular". Balanceamento em
+`content.ts` intocado.

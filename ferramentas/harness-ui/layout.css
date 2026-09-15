@@ -1,0 +1,239 @@
+/* ---------- casca do jogo: uma tela, sem rolagem de página ---------- */
+
+/* A tela de jogo inteira cabe na viewport. O campo é a âncora e a doca ocupa
+   o resto: no retrato ela fica logo abaixo do campo, na paisagem vira trilho
+   ao lado. Em nenhum dos dois é preciso rolar a PÁGINA para achar as torres —
+   era esse o problema. */
+.pr-shell {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pr-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-right: max(8px, env(safe-area-inset-right, 0px));
+}
+
+/* Não cresce nem estica: a altura dele é a altura do campo. */
+.pr-field-box {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* A doca fica com a sobra e só rola por dentro, nunca arrasta a página. */
+.pr-dock {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+canvas.pr-canvas {
+  /* A folha apoiada na mesa. Sem rotação: `toField` converte ponteiro para
+     coordenadas do campo via getBoundingClientRect, que não desfaz rotação.
+
+     A largura é `min(cabe na caixa, cabe na altura que sobrou)`. Escrever o
+     limite de altura como largura equivalente — em vez de confiar em
+     max-height sobre um elemento substituído — mantém a proporção exata em
+     qualquer viewport, sem esticar e sem cortar. */
+  display: block;
+  aspect-ratio: 832 / 576;
+  width: min(100%, calc((100vh - 190px) * 832 / 576));
+  width: min(100%, calc((100dvh - 190px) * 832 / 576));
+  height: auto;
+  max-width: 100%;
+  touch-action: none;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 4px 6px 0 hsl(var(--void) / 0.55);
+}
+
+/* Bolha de dica: flutua sobre o campo para não custar altura no layout. */
+.pr-hint-float {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  max-width: min(92%, 420px);
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ---------- doca: torres e ações ---------- */
+
+/* Ladrilhos, não linhas. Sete torres em lista vertical não caberiam na
+   paisagem de celular (medido: 359px de estouro), e nome + preço é tudo que
+   se decide na hora de construir — o resto é papel do tutorial e do códice. */
+.pr-towers {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+}
+
+.pr-tower {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 5px 4px;
+  min-height: 68px;
+  border-radius: 14px;
+}
+
+/* Nome e preço empilhados e sem quebra: o emoji do preço caía sozinho numa
+   segunda linha e esticava a fileira inteira do grid. */
+.pr-tower-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+}
+.pr-tower-name,
+.pr-tower-cost {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.pr-tower-name { font-size: 12px; }
+.pr-tower-cost { font-size: 11px; }
+.pr-tower-key { display: none; }
+
+/* A linha descritiva só existe onde há largura sobrando. */
+.pr-tower-tag { display: none; }
+
+/* Uma faixa só para o polegar: chamar onda + as três habilidades. */
+.pr-acts {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.pr-acts > .pr-wave { flex: 1 1 auto; min-width: 0; }
+.pr-acts > .pr-act {
+  flex: 0 0 auto;
+  width: 48px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  font-size: 19px;
+}
+.pr-act-cost {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ---------- vira trilho lateral ---------- */
+
+/* Paisagem de celular entra por aqui: a altura é o recurso escasso, então o
+   campo manda na altura e a doca fica ao lado. */
+@media (min-width: 880px), (orientation: landscape) and (min-width: 700px) and (min-height: 340px) {
+  .pr-body { flex-direction: row; }
+
+  .pr-field-box { flex: 1 1 auto; min-width: 0; }
+
+  canvas.pr-canvas {
+    width: min(100%, calc((100vh - 74px) * 832 / 576));
+    width: min(100%, calc((100dvh - 74px) * 832 / 576));
+  }
+
+  .pr-dock {
+    flex: 0 0 auto;
+    /* Largo de propósito na paisagem de celular: ali o campo é limitado pela
+       ALTURA, então alargar o trilho não tira um pixel do mapa — e é o que
+       faz as sete torres caberem em duas fileiras, sem rolagem. */
+    width: clamp(276px, 42vw, 380px);
+  }
+}
+
+/* Só no desktop, onde a altura é folgada, o ladrilho volta a ser linha com
+   descrição — aí a informação extra não custa nada. */
+@media (min-width: 1100px) and (min-height: 700px) {
+  .pr-towers { grid-template-columns: 1fr; }
+  .pr-tower {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 6px 10px;
+    min-height: 64px;
+    text-align: left;
+  }
+  .pr-tower-body { align-items: flex-start; flex: 1 1 auto; width: auto; }
+  .pr-tower-name, .pr-tower-cost { font-size: 13px; }
+  .pr-tower-tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pr-tower-tag { display: block; }
+  .pr-tower-key { display: inline; }
+}
+
+/* O subtítulo do painel de construir é o que estoura a doca na paisagem de
+   celular. A bolha sobre o campo já diz a mesma coisa, então ele sai. */
+.pr-dock-sub { display: none; }
+@media (min-width: 1100px) and (min-height: 700px) {
+  .pr-dock-sub { display: inline; }
+}
+
+.pr-legend { display: none; }
+@media (min-height: 760px) and (max-width: 879px) {
+  .pr-legend { display: block; }
+}
+
+/* ---------- barra de cima ---------- */
+
+/* Não pode quebrar linha: "← Sair" virando duas linhas empurrava os botões de
+   pausa para fora da tela no retrato de 390px. */
+.pr-topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding: 6px 8px;
+  height: 48px;
+}
+.pr-topbar-label { display: none; }
+.pr-spacer { margin-left: auto; }
+
+/* Uma casa só, que cicla 1×→2×→3× ao toque. O grupo de três botões não cabe
+   com os indicadores no retrato, e a tecla `a` já ciclava assim no teclado. */
+.pr-speed-all { display: none; }
+
+/* Abaixo de 400px o "/20" sai: o máximo é informação parada, o que se
+   acompanha é o número atual — e era ele que empurrava a pausa para fora. */
+.pr-of { display: none; }
+
+@media (min-width: 400px) {
+  .pr-of { display: inline; }
+}
+
+@media (min-width: 560px) {
+  .pr-topbar { gap: 8px; padding: 8px 12px; height: 52px; }
+  .pr-topbar-label { display: inline; }
+  .pr-speed-one { display: none; }
+  .pr-speed-all { display: flex; }
+}
