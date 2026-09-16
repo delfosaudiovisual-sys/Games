@@ -1,0 +1,39 @@
+{
+  "include": ["src", "convex", "__tests__", "*.ts", "*.tsx"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/convex/*": ["./convex/*"],
+      "@/*": ["./src/*"]
+    },
+
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+
+    /* O projeto no Macaly rodava com `strict: false`, e foi assim que passou um
+       `levels[level - 3].label` fora do array — o crash que o jogador viu.
+       Aqui é estrito: medido, `strict: true` custa 9 erros (praticamente de
+       graça) e pega a classe de bug de null/undefined.
+
+       `noUncheckedIndexedAccess` seria o que pegaria ESSE crash em tempo de
+       compilação, mas custa 195 erros no código herdado (aritmética de índice
+       em render.ts, sketch.ts e engine.ts, onde o índice é provadamente
+       válido). Fica como próximo passo de endurecimento, arquivo por arquivo —
+       não com `!` no atacado, que silencia em vez de conferir. Enquanto isso, a
+       defesa desse caso específico é `src/game/upgrades.ts` com o teste que
+       varre a matriz de níveis. */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}

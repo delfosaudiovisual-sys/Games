@@ -1,6 +1,7 @@
 import { it } from 'vitest'
 import { Engine } from '../src/game/engine'
-import { COLS, MAPS, ROWS, TOWER_ORDER, defaultModifiers } from '../src/game/content'
+import { COLS, MAPS, ROWS, defaultModifiers } from '../src/game/content'
+import { unlockedTowers } from '../src/game/unlock'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type E = any
 /** Devolve o isBuildable ANTIGO: qualquer celula nao bloqueada. */
@@ -29,7 +30,11 @@ function loja(e: E) {
       return melhor
     }
     vagas.sort((x, y) => perto(x[0], x[1]) - perto(y[0], y[1]))
-    const id = TOWER_ORDER[e.towers.length % TOWER_ORDER.length]
+    // Ciente do desbloqueio: o jogador automatico so constroi o que a onda
+    // atual liberou, como um jogador de primeira viagem. E o caso pior — quem
+    // ja avancou comeca a partida com o arsenal inteiro.
+    const pool = unlockedTowers(e.wave)
+    const id = pool[e.towers.length % pool.length]
     if (vagas.length && e.gold >= e.buildCost(id)) { e.tryBuild(vagas[0][0], vagas[0][1], id); continue }
     const ups = e.towers.filter((t: E) => t.level < 5)
       .map((t: E) => ({ t, c: t.level === 3 ? e.upgradeCost(t, 'a') : e.upgradeCost(t) }))

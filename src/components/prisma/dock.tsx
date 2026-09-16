@@ -1,5 +1,6 @@
 import { ABILITIES, SYNERGIES, TOWERS } from '@/game/content'
 import { towerTip, unlockWave } from '@/game/unlock'
+import { isMaxed, nextUpgrade } from '@/game/upgrades'
 import type { Engine } from '@/game/engine'
 import { Bar, TowerGlyph } from './glyphs'
 import type { AbilityId, Branch, HudSnapshot, Tower, TowerId } from '@/game/types'
@@ -200,12 +201,8 @@ export function TowerPanel({
     return s.damage * s.rate * mult * crit
   })()
 
-  const nextLabel = (() => {
-    if (tower.level < 3) return def.levels[tower.level].label
-    if (tower.level === 3) return null
-    if (tower.branch) return def.branches[tower.branch].levels[tower.level - 3].label
-    return null
-  })()
+  // Uma chamada só, e toda a aritmética de nível vive em `nextUpgrade`.
+  const prox = nextUpgrade(def, tower.level, tower.branch ?? null)
 
   return (
     <div className="pr-panel p-3">
@@ -261,10 +258,10 @@ export function TowerPanel({
       )}
 
       <div className="mt-3 space-y-2">
-        {tower.level < 3 && (
+        {tower.level < 3 && prox && (
           <UpgradeButton
-            label={`Melhorar → ${nextLabel}`}
-            desc={def.levels[tower.level].desc}
+            label={`Melhorar → ${prox.label}`}
+            desc={prox.desc}
             cost={engine.upgradeCost(tower)}
             gold={gold}
             gradient={def.gradient}
@@ -290,10 +287,10 @@ export function TowerPanel({
           </div>
         )}
 
-        {tower.level === 4 && tower.branch && (
+        {tower.level === 4 && tower.branch && prox && (
           <UpgradeButton
-            label={`Melhorar → ${nextLabel}`}
-            desc={def.branches[tower.branch].levels[1].desc}
+            label={`Melhorar → ${prox.label}`}
+            desc={prox.desc}
             cost={engine.upgradeCost(tower)}
             gold={gold}
             gradient={def.gradient}
@@ -301,7 +298,7 @@ export function TowerPanel({
           />
         )}
 
-        {tower.level >= 5 && (
+        {isMaxed(tower.level) && (
           <div className="rounded-xl border-2 border-edge bg-ink/5 px-3 py-2 text-center text-xs font-bold text-prisma">
             Nível máximo alcançado
           </div>

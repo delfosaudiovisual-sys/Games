@@ -1,0 +1,13 @@
+# Netlify: build estático e redirect de SPA.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Uma rota só; qualquer caminho serve o index.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

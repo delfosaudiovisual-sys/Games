@@ -34,6 +34,7 @@ describe('fusão local × nuvem', () => {
       prismas: 200,
       unlockedMaps: ['jardim', 'obsidiana'],
       achievements: ['vitoria'],
+      seenTowerTips: ['faisca', 'gelido'],
       bestWave: { jardim: 20, obsidiana: 4 },
       totalKills: 900, wins: 3, totalRuns: 11,
     })
@@ -41,12 +42,15 @@ describe('fusão local × nuvem', () => {
       prismas: 5,
       unlockedMaps: ['jardim', 'cume'],
       achievements: ['titan'],
+      seenTowerTips: ['gelido', 'estilhaco'],
       bestWave: { jardim: 12, cume: 31 },
       totalKills: 40, wins: 9, totalRuns: 2,
     })
     const r = mergeSaves(local, nuvem)
     expect(r.unlockedMaps.sort()).toEqual(['cume', 'jardim', 'obsidiana'])
     expect(r.achievements.sort()).toEqual(['titan', 'vitoria'])
+    // Quem já viu a estreia de uma torre num aparelho não vê de novo no outro.
+    expect(r.seenTowerTips.sort()).toEqual(['estilhaco', 'faisca', 'gelido'])
     expect(r.bestWave).toEqual({ jardim: 20, obsidiana: 4, cume: 31 })
     expect(r.totalKills).toBe(900)
     expect(r.wins).toBe(9)

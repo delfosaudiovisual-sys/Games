@@ -15,6 +15,8 @@ export function emptySave(): SaveData {
     wins: 0,
     muted: false,
     playerName: '',
+    seenIntros: [],
+    seenTowerTips: [],
   }
 }
 
@@ -33,6 +35,8 @@ export function loadSave(): SaveData {
       achievements: parsed.achievements ?? [],
       bestWave: { ...(parsed.bestWave ?? {}) },
       playerName: parsed.playerName ?? '',
+      seenIntros: parsed.seenIntros ?? [],
+      seenTowerTips: parsed.seenTowerTips ?? [],
     }
   } catch {
     return emptySave()
@@ -109,6 +113,8 @@ export function mergeSaves(a: SaveData, b: SaveData): SaveData {
     skills: { ...base.skills },
     unlockedMaps: Array.from(new Set([...a.unlockedMaps, ...b.unlockedMaps])),
     achievements: Array.from(new Set([...a.achievements, ...b.achievements])),
+    seenIntros: Array.from(new Set([...a.seenIntros, ...b.seenIntros])),
+    seenTowerTips: Array.from(new Set([...a.seenTowerTips, ...b.seenTowerTips])),
     bestWave,
     totalKills: Math.max(a.totalKills, b.totalKills),
     totalRuns: Math.max(a.totalRuns, b.totalRuns),
@@ -131,6 +137,8 @@ export function parseSave(raw: string | null | undefined): SaveData | null {
       achievements: p.achievements ?? [],
       bestWave: { ...(p.bestWave ?? {}) },
       playerName: p.playerName ?? '',
+      seenIntros: p.seenIntros ?? [],
+      seenTowerTips: p.seenTowerTips ?? [],
     }
   } catch {
     return null
