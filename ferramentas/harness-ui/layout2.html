@@ -1,0 +1,137 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>prova de layout · tela cheia</title>
+<link rel="stylesheet" href="tokens.css"><link rel="stylesheet" href="layout2.css">
+<style>
+  .b{font-weight:700}.dim{color:hsl(var(--ink-dim))}.soft{color:hsl(var(--ink-soft))}
+  .amber{color:hsl(var(--amber))}.t10{font-size:10px}.t11{font-size:11px}.t12{font-size:12px}.t13{font-size:13px}
+  .glyph{width:38px;height:38px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,hsl(var(--prisma)),hsl(var(--violet)))}
+  .pr-btn{border-radius:14px;border:2px solid hsl(var(--edge));background:hsl(var(--ink)/.07);color:hsl(var(--ink))}
+  .pr-btn-hot{background:hsl(var(--prisma));color:hsl(var(--void));border-color:hsl(var(--void)/.5);font-weight:700}
+  .pr-hint{border:2px solid hsl(var(--edge-hot));background:linear-gradient(135deg,hsl(var(--prisma)/.18),hsl(var(--violet)/.12));border-radius:16px}
+</style></head><body>
+<div class="pr-shell pr-stage">
+  <canvas id="cv" class="pr-canvas"></canvas>
+  <div class="pr-hud">
+    <div class="pr-topo">
+      <div class="pr-ilha" id="ilha-tl">
+        <button class="pr-btn t12 b" style="padding:6px 9px">←<span class="pr-rotulo"> Sair</span></button>
+        <span class="pr-num">💛 20<span class="dim pr-of">/20</span></span>
+        <span class="pr-num amber">🪙 280</span>
+        <span class="pr-num">🌊 3<span class="dim pr-of">/20</span></span>
+      </div>
+      <div class="pr-vao"></div>
+      <div class="pr-ilha" id="ilha-tr">
+        <button class="pr-btn t12 b" style="padding:6px 9px">1×</button>
+        <button class="pr-btn t12" style="padding:6px 9px">❚❚</button>
+      </div>
+    </div>
+
+    <div class="pr-zoom">
+      <button class="pr-btn pr-ilha pr-redondo">＋</button>
+      <button class="pr-btn pr-ilha pr-redondo">⛶</button>
+      <button class="pr-btn pr-ilha pr-redondo">－</button>
+    </div>
+
+    <div class="pr-dica t13 b" id="dica" style="padding:7px 13px">Pinça ou toque duplo aproxima o mapa</div>
+
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+      <div class="pr-folha" id="folha" hidden>
+        <div class="pr-folha-cab">
+          <b class="t13">Construir</b>
+          <span class="t11 dim pr-rotulo">toque numa torre, depois numa plataforma</span>
+          <button class="pr-btn t12" style="margin-left:auto;padding:4px 9px">✕</button>
+        </div>
+        <div class="pr-towers" id="towers"></div>
+      </div>
+      <div class="pr-base">
+        <div class="pr-ilha" id="ilha-bl">
+          <button class="pr-btn pr-redondo" id="btn-build">🔨</button>
+        </div>
+        <div class="pr-vao"></div>
+        <button class="pr-btn pr-btn-hot t13 b" id="btn-wave" style="padding:11px 14px;border-radius:999px">Chamar onda 4 <span class="t11">+18 🪙</span></button>
+        <div class="pr-vao"></div>
+        <div class="pr-ilha" id="ilha-br">
+          <button class="pr-btn pr-redondo">⚡</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module">
+  const FIELD_W = 832, FIELD_H = 576, CELL = 64, MAX_ZOOM = 1.6
+  const TORRES = [['Lápis',60],['Giz',90],['Guache',130],['Lupa',200],['Clipe',150],['Solvente',110],['Luminária',140]]
+  const qs = new URLSearchParams(location.search)
+  const n = Number(qs.get('n') || 7)
+  const aberta = qs.get('folha') === '1'
+  document.getElementById('folha').hidden = !aberta
+  document.getElementById('towers').innerHTML = TORRES.slice(0, n).map(([nome, custo]) => `
+    <button class="pr-btn pr-tower"><span class="glyph"></span><span class="pr-tower-body">
+      <span class="pr-tower-name">${nome}</span><span class="pr-tower-cost amber">${custo} 🪙</span>
+    </span></button>`).join('')
+
+  const cv = document.getElementById('cv')
+  const dpr = Math.min(2, devicePixelRatio || 1)
+  const w = cv.clientWidth, h = cv.clientHeight
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr)
+  const g = cv.getContext('2d')
+  // espelha defaultView() de src/game/view.ts: enche a altura, nunca menos de
+  // 6 colunas, nunca menos que o "cabe tudo"
+  const fit = Math.min(w / FIELD_W, h / FIELD_H)
+  const zoom = Math.max(fit, Math.min(MAX_ZOOM, h / FIELD_H, w / (6 * CELL)))
+  const eixo = (o, vis, total) => (vis >= total ? -(vis - total) / 2 : Math.min(Math.max(o, 0), total - vis))
+  const ox = eixo(FIELD_W / 2 - w / zoom / 2, w / zoom, FIELD_W)
+  const oy = eixo(0, h / zoom, FIELD_H)
+  const k = zoom * dpr
+  g.setTransform(k, 0, 0, k, -ox * k, -oy * k)
+  g.fillStyle = '#e8ddc5'; g.fillRect(0, 0, FIELD_W, FIELD_H)
+  g.strokeStyle = 'rgba(43,36,25,0.18)'; g.lineWidth = 1 / zoom
+  for (let c = 0; c <= 13; c++) { g.beginPath(); g.moveTo(c * CELL, 0); g.lineTo(c * CELL, FIELD_H); g.stroke() }
+  for (let r = 0; r <= 9; r++) { g.beginPath(); g.moveTo(0, r * CELL); g.lineTo(FIELD_W, r * CELL); g.stroke() }
+  g.strokeStyle = '#2b2419'; g.lineWidth = 3 / zoom
+  g.beginPath(); g.arc(FIELD_W / 2, FIELD_H / 2, 240, 0, Math.PI * 2); g.stroke()
+  g.strokeRect(0, 0, FIELD_W, FIELD_H)
+  g.fillStyle = '#2b2419'; g.font = `700 ${40}px Inter, sans-serif`; g.textAlign = 'center'
+  g.fillText(`célula ${(zoom * CELL).toFixed(1)}px`, FIELD_W / 2, FIELD_H / 2 + 14)
+
+  // retângulo do campo em px de tela
+  const campo = { x: (0 - ox) * zoom, y: (0 - oy) * zoom, w: FIELD_W * zoom, h: FIELD_H * zoom }
+
+  const area = (r) => Math.max(0, r.w) * Math.max(0, r.h)
+  const cruza = (a, b) => {
+    const x = Math.max(a.x, b.left), y = Math.max(a.y, b.top)
+    const x2 = Math.min(a.x + a.w, b.right), y2 = Math.min(a.y + a.h, b.bottom)
+    return { x, y, w: x2 - x, h: y2 - y }
+  }
+
+  window.__medida = () => {
+    const doc = document.scrollingElement
+    const ilhas = [...document.querySelectorAll('.pr-ilha, .pr-zoom button, #btn-wave, .pr-folha:not([hidden])')]
+    let coberto = 0
+    let estouro = false
+    for (const el of ilhas) {
+      const r = el.getBoundingClientRect()
+      coberto += area(cruza(campo, r))
+      if (r.right > innerWidth + 0.5 || r.left < -0.5) estouro = true
+    }
+    const t = document.querySelector('.pr-tower')?.getBoundingClientRect()
+    const todas = [...document.querySelectorAll('.pr-tower')]
+    const ult = todas.length ? todas[todas.length - 1].getBoundingClientRect() : null
+    const folha = document.getElementById('folha')
+    return {
+      vp: [innerWidth, innerHeight],
+      rolagemPagina: doc.scrollHeight - doc.clientHeight,
+      canvasCobreTela: cv.clientWidth === innerWidth && cv.clientHeight === innerHeight,
+      celula: +(zoom * CELL).toFixed(1),
+      campo: [Math.round(campo.w), Math.round(campo.h)],
+      proporcao: +(campo.w / campo.h).toFixed(3),
+      mapaCobertoPct: +((coberto / area(campo)) * 100).toFixed(1),
+      ilhaEstoura: estouro,
+      folhaAberta: !folha.hidden,
+      rolagemFolha: folha.hidden ? 0 : folha.scrollHeight - folha.clientHeight,
+      cartao: t ? [Math.round(t.width), Math.round(t.height)] : null,
+      ultimaTorreVisivel: ult ? ult.bottom <= innerHeight + 0.5 : null,
+    }
+  }
+  window.__ready = true
+</script></body></html>

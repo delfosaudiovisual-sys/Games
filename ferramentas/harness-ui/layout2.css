@@ -1,0 +1,227 @@
+/* ---------- tela cheia: o mapa é a tela ---------- */
+
+/* O campo ocupa a viewport inteira e a interface flutua por cima, em ilhas
+   ancoradas nos cantos. Não há mais doca dividindo espaço com o mapa: o que
+   antes era layout agora é sobreposição, e o que antes era rolagem é zoom.
+
+   `position: fixed` em vez de altura 100dvh: no celular a barra do navegador
+   entra e sai, e com fixed o canvas não fica remexendo de tamanho a cada
+   aparição dela. */
+.pr-shell {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* O bitmap é dimensionado por JS para a caixa × DPR; aqui só mandamos ele
+   cobrir tudo. As faixas vazias (proporção 13:9 contra tela em pé) mostram a
+   mesa por baixo, porque fora do campo o canvas é transparente. */
+canvas.pr-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+canvas.pr-canvas:active { cursor: grabbing; }
+
+/* A moldura da interface não intercepta toque: só os filhos interativos. */
+.pr-hud {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px))
+    max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  gap: 8px;
+}
+.pr-hud > * { pointer-events: none; }
+.pr-hud button,
+.pr-hud .pr-ilha,
+.pr-hud .pr-folha { pointer-events: auto; }
+
+/* Ilha: pastilha de papel translúcida sobre o mapa. */
+.pr-ilha {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: hsl(var(--glass-strong));
+  border: 1.5px solid hsl(var(--edge));
+  box-shadow: 2px 3px 0 hsl(var(--void) / 0.5);
+}
+
+.pr-topo,
+.pr-base {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.pr-topo { align-items: flex-start; }
+
+/* Empurra a ilha da direita para a borda sem precisar de elemento vazio. */
+.pr-vao { flex: 1 1 auto; min-width: 0; pointer-events: none; }
+
+/* Os números do jogo, dentro da ilha do canto. */
+.pr-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+  white-space: nowrap;
+  background: hsl(var(--ink) / 0.07);
+}
+
+/* Botão redondo de canto: 44px é o mínimo de dedo. */
+.pr-redondo {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 17px;
+  position: relative;
+}
+
+/* Pilha de zoom, encostada na borda direita e centralizada na vertical. */
+.pr-zoom {
+  position: absolute;
+  right: max(8px, env(safe-area-inset-right, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: none;
+}
+.pr-zoom button { pointer-events: auto; }
+
+/* ---------- a folha que abre ---------- */
+
+/* Um painel só de cada vez, ancorado no rodapé e limitado a 58% da tela: o
+   mapa nunca desaparece atrás dele. */
+.pr-folha {
+  width: 100%;
+  max-height: 58dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: hsl(var(--glass-strong));
+  border: 2px solid hsl(var(--edge));
+  border-radius: 16px 18px 6px 6px;
+  box-shadow: 0 -6px 24px -12px hsl(var(--void));
+  padding: 8px;
+}
+
+@keyframes pr-sobe {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.pr-folha { animation: pr-sobe 0.16s ease-out both; }
+
+.pr-folha-cab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+/* A grade de torres dentro da folha: ladrilho de dedo, sem lista vertical. */
+.pr-towers {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+}
+
+.pr-tower {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  min-height: 74px;
+  border-radius: 14px;
+}
+
+.pr-tower-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+}
+.pr-tower-name,
+.pr-tower-cost {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.pr-tower-name { font-size: 12px; }
+.pr-tower-cost { font-size: 11px; }
+
+.pr-act-cost {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ---------- telas largas ---------- */
+
+/* No desktop há espaço para a folha ficar aberta ao lado sem cobrir nada,
+   então ela vira coluna à direita e deixa de ser gaveta. */
+@media (min-width: 1100px) {
+  .pr-folha {
+    width: 380px;
+    margin-left: auto;
+    max-height: none;
+    border-radius: 16px 18px 15px 19px;
+  }
+  .pr-towers { grid-template-columns: 1fr 1fr; }
+}
+
+/* Abaixo de 400px o "/20" sai: o máximo é informação parada, o que se
+   acompanha é o número atual. */
+.pr-of { display: none; }
+@media (min-width: 400px) {
+  .pr-of { display: inline; }
+}
+
+.pr-rotulo { display: none; }
+@media (min-width: 560px) {
+  .pr-rotulo { display: inline; }
+}
+
+/* Bolha de dica: no meio de baixo, acima das ilhas, sem interceptar toque.
+   Estilo próprio, e não o `.pr-hint` claro: ela agora flutua sobre o PAPEL, e
+   texto claro sobre papel claro não se lê. */
+.pr-dica {
+  align-self: center;
+  /* Empurra para junto das ilhas de baixo: no centro da tela ela atravessava
+     o mapa. */
+  margin-top: auto;
+  max-width: min(92%, 420px);
+  text-align: center;
+  pointer-events: none;
+  background: hsl(var(--glass-strong));
+  border: 2px solid hsl(var(--edge-hot));
+  border-radius: 16px;
+  box-shadow: 2px 3px 0 hsl(var(--void) / 0.5);
+}

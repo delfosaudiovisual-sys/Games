@@ -468,3 +468,118 @@ bundle publicado confere: `pr-shell`, `pr-field-box`, `pr-towers`, `pr-topbar`,
 `pr-legend`, o trilho de 42vw, `aspect-ratio:832/576`, `seenTowerTips`, o
 cartão de estreia — e zero ocorrências de "Gire o celular". Balanceamento em
 `content.ts` intocado.
+
+---
+
+# Rodada 6 — o mapa é a tela, e ganhou zoom
+
+A rodada 5 tirou a rolagem, mas o mapa continuou pequeno. Duas razões, e só
+uma delas era layout.
+
+## Por que nenhum layout resolvia
+
+O campo é 13×9 — proporção 1.444. Um celular em pé é 0.46. Encaixar um no
+outro pela largura dá **célula de 30px** e duas tiras vazias de 287px. A doca
+não era a culpada: mesmo com a tela toda para o canvas, encaixar o campo
+inteiro no retrato dá os mesmos 30px. **A proporção é a restrição.**
+
+A saída não é layout, é parar de mostrar o campo inteiro quando o jogador quer
+mirar. Isso é zoom.
+
+## A visão
+
+`src/game/view.ts` guarda `{ zoom, x, y }`, onde `x`/`y` é o ponto **do campo**
+que aparece no canto superior esquerdo do canvas. Guardar a origem em
+coordenadas de campo é o que faz arrasto e pinça serem contas de uma linha, e é
+o que mantém o ponto sob o dedo parado quando o zoom muda.
+
+O canvas virou a viewport inteira (`position: fixed; inset: 0`) e o bitmap
+passou a seguir a **caixa × DPR**, não mais o campo — porque agora quem decide
+que parte do campo aparece é a visão, não o elemento.
+
+### A regra da abertura
+
+```
+zoom = max(cabe_tudo, min(1.6, altura_da_tela / 576, largura / (6 × 64)))
+```
+
+Encher a **altura** da tela, sem nunca mostrar menos de **6 das 13 colunas**:
+
+| tela | antes (rodada 5) | agora, na abertura | "ver tudo" |
+|---|---|---|---|
+| 390×844 em pé | 28,8px | **65,0px** (+126%) | 30,0px |
+| 360×640 em pé | 26,5px | **60,0px** | 27,7px |
+| 844×390 deitado | 35,1px | **43,3px** | igual |
+| 1440×900 | 79,7px | **100,0px** | igual |
+
+As nove fileiras continuam **sempre** visíveis — o que se perde é largura, e
+largura se recupera arrastando de lado, ao longo do caminho. Em tela deitada e
+no monitor a regra não muda nada: lá encher a altura já mostra o campo inteiro,
+e é o maior tamanho possível.
+
+## Controles colapsáveis
+
+A interface virou ilhas translúcidas nos cantos e uma folha que abre **uma por
+vez**: 🔨 construir, ⚡ poderes, ou a torre selecionada. Escolher uma torre
+fecha a folha — para colocá-la é preciso ver o mapa.
+
+Quanto do mapa as ilhas escondem, medido:
+
+| tela | ilhas fechadas | folha aberta |
+|---|---|---|
+| 390×844 | **1,2%** | 13,6% |
+| 360×640 | 1,4% | 19,9% |
+| 844×390 | **5,9%** | 40,6% |
+| 1440×900 | 1,1% | 12,3% (vira coluna lateral) |
+
+No retrato as ilhas caem quase inteiras nas tiras vazias, e é por isso que 1,2%
+é possível.
+
+## Toque, arrasto e pinça no mesmo canvas
+
+O canvas recebe as três coisas, e confundir uma com a outra quebra o jogo
+(arrastar o mapa construindo torre). A separação:
+
+- um dedo, movimento **≤ 12px** → clique: constrói ou seleciona;
+- um dedo, **> 12px** → arrasto, e o clique é cancelado;
+- **dois dedos** → pinça ancorada no ponto médio, e nunca conta como clique;
+- roda do mouse → zoom ancorado no cursor; `＋ ⛶ －` e as teclas `f` `+` `-`.
+
+Não há toque duplo: ele competiria com o clique de construir, e o primeiro
+toque já teria agido.
+
+## Como isso foi verificado sem navegador
+
+Não consigo abrir o app React num navegador nesta sessão. As duas partes de
+risco foram verificadas do lado de fora:
+
+1. **A conta da visão** — `__tests__/visao.test.ts`, 15 testes de propriedade,
+   não de exemplo. O invariante central é um helper (`confere`) aplicado depois
+   de **cada** operação: no eixo em que o campo é maior que a viewport ele tem
+   de cobrir a tela sem faixa vazia; no eixo em que é menor, tem de ficar
+   centralizado e inteiro visível.
+
+   Dois testes meus falharam na primeira execução e **o módulo estava certo**:
+   eu tinha assumido que a âncora do zoom fica presa ao dedo nos dois eixos.
+   Não fica — no retrato o eixo vertical sempre cabe inteiro, logo é
+   centralizado e não tem para onde andar. A asserção virou essa distinção.
+
+2. **O desenho** — `ferramentas/harness/zoom.html` renderiza o `render.ts`
+   **real** com engine de mentira nas três visões, e imprime zoom, célula e
+   origem. É onde os 65px e os 43,3px foram vistos, não calculados.
+
+3. **A geometria da interface** — `ferramentas/harness-ui/` carrega o CSS que
+   foi publicado (md5 `c77e36d5…` ignorando comentários, idêntico ao fim de
+   `src/styles.css`) e mede oclusão, estouro de ilha e rolagem de folha.
+
+Três defeitos vieram só dessa medição: os botões de zoom quase invisíveis sobre
+o papel, o subtítulo da folha atropelando o título, e a bolha de dica com texto
+claro sobre papel claro — ela tinha o estilo do `.pr-hint`, feito para fundo
+escuro, e ganhou estilo próprio.
+
+## Verificação
+
+`check-errors` limpo, **50 testes** passando, build ok, e o bundle publicado
+confere: `pr-shell`, `pr-hud`, `pr-ilha`, `pr-folha`, `pr-zoom`, `pr-redondo`,
+`pr-dica`, o canvas em `position:absolute;inset:0`, mais `setPointerCapture` e
+`requestFullscreen` no JS. Balanceamento em `content.ts` intocado.

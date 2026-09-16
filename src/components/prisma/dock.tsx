@@ -18,63 +18,51 @@ export function fmt(n: number): string {
  * se decide na hora de construir — descrição é papel do tutorial e do códice.
  * ------------------------------------------------------------------ */
 
-export function ActionBar({
+/** Folha de poderes: as três habilidades e a energia que as paga. */
+export function SkillSheet({
   hud,
-  nextWave,
-  onCallWave,
   onAbility,
 }: {
   hud: HudSnapshot
-  nextWave: { label: string; kinds: string[]; boss: boolean } | null
-  onCallWave: () => void
   onAbility: (id: AbilityId) => void
 }) {
-  const prep = hud.status === 'prep'
   return (
-    <div className="pr-panel p-2">
-      <div className="pr-acts">
-        {prep ? (
-          <button className="pr-btn pr-btn-hot pr-wave px-2 py-2.5 text-[13px] font-bold" onClick={onCallWave}>
-            Chamar onda {hud.wave + 1}
-            <span className="ml-1 text-[11px]">+{Math.floor(hud.prepTimer * 4)} 🪙</span>
-          </button>
-        ) : (
-          <div className="pr-chip pr-wave grid place-items-center px-2 text-[12px] font-bold text-ink-soft">
-            Onda {hud.wave} · {hud.enemiesLeft} restam
-          </div>
-        )}
-
-        {ABILITIES.map((a) => {
+    <>
+      <div className="grid grid-cols-3 gap-2">
+        {ABILITIES.map((a, i) => {
           const ready = hud.energy >= a.cost
           return (
             <button
               key={a.id}
               onClick={() => onAbility(a.id)}
               disabled={!ready}
-              className="pr-btn pr-act"
-              title={`${a.name} · ${a.cost} energia`}
+              className="pr-btn flex flex-col items-center gap-1 p-2"
               style={ready ? { borderColor: a.gradient[0] } : undefined}
             >
-              {a.icon}
-              <b className="pr-act-cost text-amber">{a.cost}</b>
+              <span
+                className="grid h-10 w-10 place-items-center rounded-xl text-lg"
+                style={{ background: `linear-gradient(135deg, ${a.gradient[0]}, ${a.gradient[1]})` }}
+              >
+                {a.icon}
+              </span>
+              <span className="text-[11px] font-bold leading-tight text-ink">{a.name}</span>
+              <span className="text-[10px] text-ink-dim">
+                {a.cost} <span className="text-ink-dim">[{['Q', 'W', 'E'][i]}]</span>
+              </span>
             </button>
           )
         })}
       </div>
-
-      <div className="mt-1.5">
-        <Bar value={hud.energy} max={hud.maxEnergy} from="#67e8f9" to="#a855f7" height={6} />
+      <div className="mt-2 flex items-center gap-2">
+        <span className="shrink-0 text-[10px] uppercase tracking-widest text-ink-dim">energia</span>
+        <span className="flex-1">
+          <Bar value={hud.energy} max={hud.maxEnergy} from="#67e8f9" to="#a855f7" height={6} />
+        </span>
+        <span className="shrink-0 text-[11px] font-bold text-ink">
+          {Math.round(hud.energy)}/{hud.maxEnergy}
+        </span>
       </div>
-
-      {prep && nextWave && (
-        <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
-          <span className="shrink-0 text-[10px] uppercase tracking-widest text-ink-dim">vem aí</span>
-          {nextWave.boss && <span className="shrink-0 text-[10px] font-bold text-rose">CHEFE</span>}
-          <span className="truncate text-[11px] text-ink-soft">{nextWave.kinds.join(' · ')}</span>
-          <span className="ml-auto shrink-0 text-[11px] text-ink-dim">{hud.prepTimer.toFixed(0)}s</span>
-        </div>
-      )}
-    </div>
+    </>
   )
 }
 
@@ -94,13 +82,7 @@ export function BuildDock({
   onChoose: (id: TowerId) => void
 }) {
   return (
-    <div className="pr-panel p-2">
-      <div className="mb-1.5 flex items-baseline gap-2">
-        <b className="font-display text-[13px] text-ink">Construir</b>
-        <span className="pr-dock-sub text-[11px] text-ink-dim">toque numa torre, depois numa plataforma</span>
-      </div>
-
-      <div className="pr-towers">
+    <div className="pr-towers">
         {towers.map((id, i) => {
           const def = TOWERS[id]
           const cost = costOf(id)
@@ -141,9 +123,8 @@ export function BuildDock({
               <span className="pr-tower-name text-ink-dim">onda {locked.wave}</span>
               <span className="pr-tower-cost text-ink-dim">nova torre</span>
             </span>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

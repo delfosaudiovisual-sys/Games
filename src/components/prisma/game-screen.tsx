@@ -11,11 +11,24 @@ import {
   getWave,
 } from '@/game/content'
 import { nextUnlock, towerTip, unlockedTowers } from '@/game/unlock'
+import {
+  applyView,
+  clampView,
+  comfortZoom,
+  defaultView,
+  fitView,
+  fitZoom,
+  isFitted,
+  panView,
+  toFieldPt,
+  zoomAt,
+  type View,
+} from '@/game/view'
 import { Engine } from '@/game/engine'
 import { buildBackground, render } from '@/game/render'
 import { unlockAudio } from '@/game/audio'
 import { TowerGlyph } from './glyphs'
-import { ActionBar, BuildDock, TowerPanel, TowerTipCard, fmt } from './dock'
+import { BuildDock, SkillSheet, TowerPanel, TowerTipCard, fmt } from './dock'
 import { SubmitRun } from './leaderboard'
 import type { AbilityId, Branch, HudSnapshot, MapDef, Modifiers, TowerId } from '@/game/types'
 
@@ -40,7 +53,6 @@ interface Props {
   muted: boolean
   showIntro: boolean
   playerName: string
-  /** Onda mais alta já alcançada em qualquer mapa: é o que libera as torres. */
   progress: number
   seenTips: string[]
   onSeeTip: (id: TowerId) => void
@@ -50,27 +62,32 @@ interface Props {
   onExit: () => void
 }
 
+/** Painel aberto na gaveta. Um por vez: o mapa nunca fica coberto duas vezes. */
+type Painel = 'build' | 'skills' | null
+
+/** Movimento a partir do qual o toque é arrasto, e não clique. */
+const LIMIAR_ARRASTO = 12
+
 /**
- * Dimensiona o bitmap do canvas e fixa a escala de DPI.
+ * Dimensiona o bitmap para a caixa do canvas × DPR.
  *
- * Tem de rodar no instante em que o elemento entra no DOM. O componente tem um
- * `return` antecipado enquanto `hud` é null, então na primeira renderização o
- * canvas ainda não existe — um efeito lendo `canvasRef.current` pega null, pula
- * o dimensionamento e o canvas fica no padrão de 300x150 do HTML. O jogo então
- * desenha só o canto superior esquerdo do campo, esticado para preencher a
- * caixa. Por isso o tamanho é aplicado por ref de callback, e o laço confere a
- * cada quadro.
+ * Antes o bitmap era do tamanho do CAMPO, porque o campo era o canvas. Agora o
+ * canvas é a tela inteira e a visão é que decide que parte do campo aparece —
+ * então o bitmap tem de seguir a tela, não o campo. Devolve o tamanho em px de
+ * CSS, que é a unidade em que a visão trabalha.
  */
-function fitCanvas(canvas: HTMLCanvasElement): void {
+function fitCanvas(canvas: HTMLCanvasElement): { w: number; h: number; mudou: boolean } {
   const dpr = Math.min(2, window.devicePixelRatio || 1)
-  const w = Math.round(FIELD_W * dpr)
-  const h = Math.round(FIELD_H * dpr)
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w
-    canvas.height = h
+  const w = canvas.clientWidth || FIELD_W
+  const h = canvas.clientHeight || FIELD_H
+  const bw = Math.max(1, Math.round(w * dpr))
+  const bh = Math.max(1, Math.round(h * dpr))
+  const mudou = canvas.width !== bw || canvas.height !== bh
+  if (mudou) {
+    canvas.width = bw
+    canvas.height = bh
   }
-  // Mexer em width/height zera o estado do contexto, então a escala vem depois.
-  canvas.getContext('2d')?.setTransform(dpr, 0, 0, dpr, 0, 0)
+  return { w, h, mudou }
 }
 
 export function GameScreen({
@@ -97,17 +114,36 @@ export function GameScreen({
   const awardedRef = useRef(0)
   const endedRef = useRef(false)
 
+  // Visão do campo. Fica em ref porque muda a cada quadro de arrasto: passar
+  // por estado do React faria o rAF competir com a renderização.
+  const viewRef = useRef<View>({ zoom: 1, x: 0, y: 0 })
+  const sizeRef = useRef({ w: 0, h: 0 })
+  const iniciouRef = useRef(false)
+  const [zoomLabel, setZoomLabel] = useState(1)
+
+  const gestoRef = useRef({
+    dedos: new Map<number, { x: number; y: number }>(),
+    arrastou: false,
+    dist: 0,
+  })
+
   const [hud, setHud] = useState<HudSnapshot | null>(null)
   const [paused, setPaused] = useState(false)
   const [intro, setIntro] = useState(showIntro)
   const [build, setBuild] = useState<TowerId | null>(null)
+  const [painel, setPainel] = useState<Painel>(null)
   const [tip, setTip] = useState<TowerId | null>(null)
   const [toast, setToast] = useState<{ text: string; key: number } | null>(null)
 
-  // Ref de callback: dispara exatamente quando o canvas entra ou sai do DOM.
   const attachCanvas = useCallback((node: HTMLCanvasElement | null) => {
     canvasRef.current = node
-    if (node) fitCanvas(node)
+    if (node) {
+      const { w, h } = fitCanvas(node)
+      sizeRef.current = { w, h }
+      viewRef.current = defaultView(w, h)
+      iniciouRef.current = true
+      setZoomLabel(viewRef.current.zoom)
+    }
   }, [])
 
   const sync = useCallback(() => {
@@ -148,8 +184,6 @@ export function GameScreen({
     bgRef.current = buildBackground(eng)
     setHud(eng.hud())
 
-    // O dimensionamento do canvas saiu daqui: ver `fitCanvas` e `attachCanvas`.
-
     let raf = 0
     let last = performance.now()
     let hudAcc = 0
@@ -164,11 +198,20 @@ export function GameScreen({
       const canvas = canvasRef.current
       const ctx = canvas?.getContext('2d')
       if (canvas && ctx && bgRef.current) {
-        // Autocorreção: girar a tela pode mudar o devicePixelRatio, e mexer em
-        // width/height zera a transformação. Conferir é uma comparação por quadro.
-        if (canvas.width !== Math.round(FIELD_W * Math.min(2, window.devicePixelRatio || 1))) {
-          fitCanvas(canvas)
+        const { w, h, mudou } = fitCanvas(canvas)
+        if (mudou || w !== sizeRef.current.w || h !== sizeRef.current.h) {
+          sizeRef.current = { w, h }
+          // Girar a tela ou a barra do navegador entrando muda a caixa: manter
+          // o zoom do jogador e só reencaixar a origem.
+          viewRef.current = iniciouRef.current ? clampView(viewRef.current, w, h) : defaultView(w, h)
+          iniciouRef.current = true
         }
+        const dpr = Math.min(2, window.devicePixelRatio || 1)
+        // Limpar a tela inteira: fora do campo o canvas é transparente e a
+        // mesa aparece por baixo. Sem isso, arrastar deixa rastro nas faixas.
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        ctx.clearRect(0, 0, w, h)
+        applyView(ctx, viewRef.current, dpr)
         render(ctx, eng, bgRef.current, {
           hover: hoverRef.current,
           buildChoice: eng.buildChoice,
@@ -218,17 +261,13 @@ export function GameScreen({
     return () => window.clearTimeout(id)
   }, [toast])
 
-  /* --- arsenal: o que está liberado agora, e a estreia de cada torre --- */
+  /* --- arsenal --- */
 
-  // O progresso salvo é permanente; a onda desta partida pode passar dele.
   const reach = Math.max(progress, hud?.wave ?? 0)
   const arsenal = useMemo(() => unlockedTowers(reach), [reach])
   const locked = useMemo(() => nextUnlock(reach), [reach])
-
-  // A estreia só interrompe no preparo. As duas torres iniciais são ensinadas
-  // pela abertura, não por modal — dois avisos em sequência na onda 1 seriam
-  // ruído em cima do ruído.
   const prep = hud?.status === 'prep'
+
   useEffect(() => {
     if (!prep || tip || intro) return
     const estreia = arsenal.find((id) => towerTip(id) && !seenTips.includes(id))
@@ -245,43 +284,129 @@ export function GameScreen({
     setTip(null)
   }, [tip, onSeeTip])
 
-  /* --- ações --- */
+  /* --- visão: zoom, arrasto, pinça --- */
 
-  const toField = useCallback((clientX: number, clientY: number) => {
-    const canvas = canvasRef.current
-    if (!canvas) return null
-    const rect = canvas.getBoundingClientRect()
-    const scale = FIELD_W / rect.width
-    return { x: (clientX - rect.left) * scale, y: (clientY - rect.top) * scale }
+  const aplicaVisao = useCallback((v: View) => {
+    viewRef.current = v
+    setZoomLabel(v.zoom)
   }, [])
 
-  const onPointerMove = (ev: React.PointerEvent<HTMLCanvasElement>) => {
-    const p = toField(ev.clientX, ev.clientY)
-    if (!p) return
-    pointerRef.current = p
-    hoverRef.current = [Math.floor(p.x / CELL), Math.floor(p.y / CELL)]
-  }
+  const zoomBotao = useCallback(
+    (factor: number) => {
+      const { w, h } = sizeRef.current
+      aplicaVisao(zoomAt(viewRef.current, w / 2, h / 2, factor, w, h))
+    },
+    [aplicaVisao],
+  )
 
-  const onPointerLeave = () => {
-    hoverRef.current = null
-    pointerRef.current = null
-  }
+  const alternaEnquadre = useCallback(() => {
+    const { w, h } = sizeRef.current
+    const v = viewRef.current
+    if (isFitted(v, w, h)) {
+      aplicaVisao(zoomAt(v, w / 2, h / 2, comfortZoom(w, h) / v.zoom, w, h))
+    } else {
+      aplicaVisao(fitView(w, h))
+    }
+  }, [aplicaVisao])
 
-  const onCanvasClick = (ev: React.PointerEvent<HTMLCanvasElement>) => {
-    unlockAudio()
-    const eng = engineRef.current
-    const p = toField(ev.clientX, ev.clientY)
-    if (!eng || !p) return
-    pointerRef.current = p
-    hoverRef.current = [Math.floor(p.x / CELL), Math.floor(p.y / CELL)]
-    if (eng.pendingMeteor) {
-      eng.useAbility('meteoro', p)
+  const daTela = useCallback((ev: { clientX: number; clientY: number }) => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const r = canvas.getBoundingClientRect()
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top }
+  }, [])
+
+  const tocaCampo = useCallback(
+    (cssX: number, cssY: number) => {
+      const eng = engineRef.current
+      if (!eng) return
+      const p = toFieldPt(viewRef.current, cssX, cssY)
+      if (p.x < 0 || p.y < 0 || p.x > FIELD_W || p.y > FIELD_H) return
+      pointerRef.current = p
+      hoverRef.current = [Math.floor(p.x / CELL), Math.floor(p.y / CELL)]
+      if (eng.pendingMeteor) {
+        eng.useAbility('meteoro', p)
+        sync()
+        return
+      }
+      eng.selectSlot(Math.floor(p.x / CELL), Math.floor(p.y / CELL))
       sync()
+    },
+    [sync],
+  )
+
+  const onPointerDown = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    unlockAudio()
+    const t = daTela(ev)
+    if (!t) return
+    ev.currentTarget.setPointerCapture(ev.pointerId)
+    const g = gestoRef.current
+    g.dedos.set(ev.pointerId, t)
+    if (g.dedos.size === 1) g.arrastou = false
+    if (g.dedos.size === 2) {
+      const [a, b] = [...g.dedos.values()]
+      g.dist = Math.hypot(a.x - b.x, a.y - b.y)
+      g.arrastou = true // pinça nunca é clique
+    }
+  }
+
+  const onPointerMove = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    const t = daTela(ev)
+    if (!t) return
+    const g = gestoRef.current
+    const { w, h } = sizeRef.current
+    const antes = g.dedos.get(ev.pointerId)
+
+    if (!antes) {
+      // mouse passeando sem apertar: só realce
+      const p = toFieldPt(viewRef.current, t.x, t.y)
+      pointerRef.current = p
+      hoverRef.current = [Math.floor(p.x / CELL), Math.floor(p.y / CELL)]
       return
     }
-    eng.selectSlot(Math.floor(p.x / CELL), Math.floor(p.y / CELL))
-    sync()
+
+    if (g.dedos.size >= 2) {
+      g.dedos.set(ev.pointerId, t)
+      const [a, b] = [...g.dedos.values()]
+      const d = Math.hypot(a.x - b.x, a.y - b.y)
+      if (g.dist > 0 && d > 0) {
+        const meio = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+        aplicaVisao(zoomAt(viewRef.current, meio.x, meio.y, d / g.dist, w, h))
+      }
+      g.dist = d
+      return
+    }
+
+    const dx = t.x - antes.x
+    const dy = t.y - antes.y
+    if (!g.arrastou && Math.hypot(dx, dy) > LIMIAR_ARRASTO) g.arrastou = true
+    if (g.arrastou) {
+      aplicaVisao(panView(viewRef.current, dx, dy, w, h))
+      g.dedos.set(ev.pointerId, t)
+    }
   }
+
+  const onPointerUp = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    const g = gestoRef.current
+    const era = g.dedos.size
+    const t = daTela(ev)
+    g.dedos.delete(ev.pointerId)
+    if (era === 1 && !g.arrastou && t) {
+      setPainel(null)
+      tocaCampo(t.x, t.y)
+    }
+    if (g.dedos.size < 2) g.dist = 0
+  }
+
+  const onWheel = (ev: React.WheelEvent<HTMLCanvasElement>) => {
+    const t = daTela(ev)
+    if (!t) return
+    ev.preventDefault()
+    const { w, h } = sizeRef.current
+    aplicaVisao(zoomAt(viewRef.current, t.x, t.y, ev.deltaY < 0 ? 1.12 : 1 / 1.12, w, h))
+  }
+
+  /* --- ações --- */
 
   const chooseBuild = useCallback(
     (id: TowerId | null) => {
@@ -290,7 +415,11 @@ export function GameScreen({
       eng.buildChoice = eng.buildChoice === id ? null : id
       eng.pendingMeteor = false
       setBuild(eng.buildChoice)
-      if (eng.buildChoice) eng.clearSelection()
+      if (eng.buildChoice) {
+        eng.clearSelection()
+        // Fecha a gaveta: para colocar a torre é preciso ver o mapa.
+        setPainel(null)
+      }
       sync()
     },
     [sync],
@@ -321,6 +450,7 @@ export function GameScreen({
       eng.useAbility(id)
       setBuild(null)
       eng.buildChoice = null
+      setPainel(null)
       sync()
     },
     [sync],
@@ -341,6 +471,24 @@ export function GameScreen({
     sync()
   }, [sync])
 
+  const telaCheia = useCallback(() => {
+    const doc = document as Document & { webkitFullscreenElement?: Element }
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> }
+    if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+      void document.exitFullscreen?.()
+      return
+    }
+    const pedido = el.requestFullscreen?.() ?? el.webkitRequestFullscreen?.()
+    void Promise.resolve(pedido)
+      .then(() => {
+        // Trava na horizontal onde der (Android). No iOS isso rejeita, e está
+        // tudo bem: o retrato agora funciona sozinho.
+        const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
+        return orient?.lock?.('landscape')
+      })
+      .catch(() => undefined)
+  }, [])
+
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       const eng = engineRef.current
@@ -360,11 +508,13 @@ export function GameScreen({
         return
       }
       if (k === 'p') setPaused((v) => !v)
+      if (k === 'b') setPainel((v) => (v === 'build' ? null : 'build'))
       if (k === 'escape') {
         eng.buildChoice = null
         eng.pendingMeteor = false
         eng.clearSelection()
         setBuild(null)
+        setPainel(null)
         sync()
       }
       if (k === 'u') doUpgrade()
@@ -373,10 +523,13 @@ export function GameScreen({
       if (k === 'w') doAbility('estase')
       if (k === 'e') doAbility('reparo')
       if (k === 'a') cycleSpeed()
+      if (k === 'f') alternaEnquadre()
+      if (k === '+' || k === '=') zoomBotao(1.2)
+      if (k === '-') zoomBotao(1 / 1.2)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [arsenal, callWave, chooseBuild, cycleSpeed, doAbility, doSell, doUpgrade, sync])
+  }, [alternaEnquadre, arsenal, callWave, chooseBuild, cycleSpeed, doAbility, doSell, doUpgrade, sync, zoomBotao])
 
   const eng = engineRef.current
   const selected = hud?.selectedTower ?? null
@@ -391,8 +544,9 @@ export function GameScreen({
 
   const hint = (() => {
     if (!hud || hud.status === 'draft' || hud.status === 'victory' || hud.status === 'defeat') return null
-    if (towerCount === 0 && !build) return 'Escolha uma torre na doca abaixo'
     if (build) return 'Agora toque numa plataforma'
+    if (painel) return null
+    if (towerCount === 0) return 'Toque em 🔨 para escolher uma torre'
     if (towerCount > 0 && hud.wave === 0) return 'Construa mais ou chame a primeira onda'
     return null
   })()
@@ -401,169 +555,206 @@ export function GameScreen({
     return <div className="pr-stage grid min-h-screen place-items-center text-ink-soft">Abrindo o caderno…</div>
   }
 
+  const aberto = selected ? 'tower' : painel
+
   return (
     <div className="pr-shell pr-stage">
-      <header className="pr-rail pr-topbar">
-        <button
-          className="pr-btn shrink-0 px-2.5 py-1.5 text-xs font-bold"
-          onClick={() => {
-            award()
-            onExit()
-          }}
-        >
-          ←<span className="pr-topbar-label"> Sair</span>
-        </button>
+      <canvas
+        ref={attachCanvas}
+        className="pr-canvas"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onWheel={onWheel}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          chooseBuild(null)
+          engineRef.current?.clearSelection()
+          setPainel(null)
+          sync()
+        }}
+      />
 
-        <span className="pr-chip shrink-0 px-2.5 py-1.5 font-display text-xs font-bold text-ink">
-          💛 {hud.lives}
-          <span className="pr-of text-ink-dim">/{hud.maxLives}</span>
-        </span>
+      <div className="pr-hud">
+        <div className="pr-topo">
+          <div className="pr-ilha">
+            <button
+              className="pr-btn px-2.5 py-1.5 text-xs font-bold"
+              onClick={() => {
+                award()
+                onExit()
+              }}
+            >
+              ←<span className="pr-rotulo"> Sair</span>
+            </button>
+            <span className="pr-num text-ink">
+              💛 {hud.lives}
+              <span className="pr-of text-ink-dim">/{hud.maxLives}</span>
+            </span>
+            <span className="pr-num text-amber">🪙 {fmt(hud.gold)}</span>
+            <span className="pr-num text-ink">
+              🌊 {hud.wave}
+              {hud.endless ? (
+                <span className="text-magenta">∞</span>
+              ) : (
+                <span className="pr-of text-ink-dim">/{hud.maxWaves}</span>
+              )}
+            </span>
+          </div>
 
-        <span className="pr-chip shrink-0 px-2.5 py-1.5 font-display text-xs font-bold text-amber">
-          🪙 {fmt(hud.gold)}
-        </span>
+          <div className="pr-vao" />
 
-        <span className="pr-chip shrink-0 px-2.5 py-1.5 font-display text-xs font-bold text-ink">
-          🌊 {hud.wave}
-          {hud.endless ? (
-            <span className="text-magenta">∞</span>
-          ) : (
-            <span className="pr-of text-ink-dim">/{hud.maxWaves}</span>
-          )}
-        </span>
-
-        {hud.combo > 3 && (
-          <span className="pr-chip hidden shrink-0 animate-pulse px-2.5 py-1.5 font-display text-xs font-bold text-magenta sm:inline">
-            ×{hud.combo}
-          </span>
-        )}
-
-        <span className="pr-spacer flex shrink-0 items-center gap-1">
-          {/* Uma casa no retrato, três no desktop: ver `.pr-speed-one`. */}
-          <button className="pr-btn pr-speed-one px-2.5 py-1.5 text-xs font-bold" onClick={cycleSpeed}>
-            {hud.speed}×
-          </button>
-          <span className="pr-chip pr-speed-all items-center gap-1 p-1">
-            {[1, 2, 3].map((s) => (
-              <button
-                key={s}
-                onClick={() => {
-                  eng?.setSpeed(s)
-                  sync()
-                }}
-                className={`rounded-full px-2.5 py-1 text-xs font-bold transition ${
-                  hud.speed === s ? 'bg-prisma text-void' : 'text-ink-soft hover:text-ink'
-                }`}
-              >
-                {s}×
-              </button>
-            ))}
-          </span>
-          <button className="pr-btn px-2.5 py-1.5 text-xs" onClick={() => setPaused((v) => !v)}>
-            {paused ? '▶' : '❚❚'}
-          </button>
-          <button className="pr-btn hidden px-2.5 py-1.5 text-xs sm:block" onClick={onToggleMute} title="Som">
-            {muted ? '🔇' : '🔊'}
-          </button>
-        </span>
-      </header>
-
-      <div className="pr-body">
-        <div className="pr-field-box">
-          <canvas
-            ref={attachCanvas}
-            className="pr-canvas"
-            onPointerMove={onPointerMove}
-            onPointerLeave={onPointerLeave}
-            onPointerDown={onCanvasClick}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              chooseBuild(null)
-              engineRef.current?.clearSelection()
-              sync()
-            }}
-          />
-          {hint && (
-            <div className="pr-hint pr-hint-float pr-bob px-3 py-2 font-display text-[13px] font-bold text-ink">
-              {hint}
-            </div>
-          )}
+          <div className="pr-ilha">
+            <button className="pr-btn px-2.5 py-1.5 text-xs font-bold" onClick={cycleSpeed} title="Velocidade">
+              {hud.speed}×
+            </button>
+            <button className="pr-btn px-2.5 py-1.5 text-xs" onClick={() => setPaused((v) => !v)} title="Pausar">
+              {paused ? '▶' : '❚❚'}
+            </button>
+          </div>
         </div>
 
-        <div className="pr-dock pr-scroll">
-          <ActionBar hud={hud} nextWave={nextWaveInfo} onCallWave={callWave} onAbility={doAbility} />
+        <div className="pr-zoom">
+          <button className="pr-btn pr-ilha pr-redondo" onClick={() => zoomBotao(1.25)} title="Aproximar">
+            ＋
+          </button>
+          <button className="pr-btn pr-ilha pr-redondo" onClick={alternaEnquadre} title="Ver tudo / aproximar">
+            {/* lê o estado, não a ref: é o que faz o ícone acompanhar o zoom */}
+            {zoomLabel <= fitZoom(sizeRef.current.w, sizeRef.current.h) + 1e-6 ? '🔍' : '⛶'}
+          </button>
+          <button className="pr-btn pr-ilha pr-redondo" onClick={() => zoomBotao(1 / 1.25)} title="Afastar">
+            －
+          </button>
+        </div>
 
-          {selected ? (
-            <TowerPanel
-              engine={eng}
-              tower={selected}
-              gold={hud.gold}
-              onUpgrade={doUpgrade}
-              onSell={doSell}
-              onClose={() => {
-                eng?.clearSelection()
-                sync()
-              }}
-              onPriority={() => {
-                if (eng && selected) {
-                  eng.cyclePriority(selected.uid)
+        {hint && (
+          <div className="pr-dica pr-bob px-3 py-2 font-display text-[13px] font-bold text-ink">{hint}</div>
+        )}
+
+        <div className="flex min-w-0 flex-col gap-2">
+          {aberto === 'tower' && selected && (
+            <div className="pr-folha">
+              <TowerPanel
+                engine={eng}
+                tower={selected}
+                gold={hud.gold}
+                onUpgrade={doUpgrade}
+                onSell={doSell}
+                onClose={() => {
+                  eng?.clearSelection()
                   sync()
-                }
-              }}
-            />
-          ) : (
-            <BuildDock
-              towers={arsenal}
-              locked={locked}
-              build={build}
-              gold={hud.gold}
-              costOf={(id) => eng?.buildCost(id) ?? TOWERS[id].levels[0].cost}
-              onChoose={chooseBuild}
-            />
-          )}
-
-          {hud.synergies.length > 0 && (
-            <div className="pr-panel p-2">
-              <h3 className="mb-1.5 font-display text-[13px] font-bold text-ink">Sinergias ativas</h3>
-              <div className="space-y-1.5">
-                {hud.synergies.map((sid) => {
-                  const s = SYNERGIES.find((x) => x.id === sid)
-                  if (!s) return null
-                  return (
-                    <div key={sid} className="rounded-xl border border-edge bg-ink/5 px-2.5 py-1.5">
-                      <div className="font-display text-xs font-bold text-prisma">{s.name}</div>
-                      <div className="text-[11px] text-ink-soft">{s.desc}</div>
-                    </div>
-                  )
-                })}
-              </div>
+                }}
+                onPriority={() => {
+                  if (eng && selected) {
+                    eng.cyclePriority(selected.uid)
+                    sync()
+                  }
+                }}
+              />
             </div>
           )}
 
-          {hud.blessings.length > 0 && (
-            <div className="pr-panel p-2">
-              <h3 className="mb-1.5 font-display text-[13px] font-bold text-ink">Bênçãos</h3>
-              <div className="flex flex-wrap gap-1.5">
-                {hud.blessings.map(({ id, count }) => {
-                  const b = BLESSING_BY_ID[id]
-                  if (!b) return null
-                  return (
-                    <span key={id} className="pr-chip px-2 py-1 text-[11px] text-ink-soft" title={b.desc}>
-                      {b.icon} {b.name}
-                      {count > 1 && <b className="ml-1 text-prisma">×{count}</b>}
-                    </span>
-                  )
-                })}
+          {aberto === 'build' && (
+            <div className="pr-folha">
+              <div className="pr-folha-cab">
+                <b className="font-display text-[13px] text-ink">Construir</b>
+                <span className="pr-rotulo text-[11px] text-ink-dim">toque numa torre, depois numa plataforma</span>
+                <button className="pr-btn ml-auto px-2.5 py-1 text-xs" onClick={() => setPainel(null)}>
+                  ✕
+                </button>
               </div>
+              <BuildDock
+                towers={arsenal}
+                locked={locked}
+                build={build}
+                gold={hud.gold}
+                costOf={(id) => eng?.buildCost(id) ?? TOWERS[id].levels[0].cost}
+                onChoose={chooseBuild}
+              />
             </div>
           )}
+
+          {aberto === 'skills' && (
+            <div className="pr-folha">
+              <div className="pr-folha-cab">
+                <b className="font-display text-[13px] text-ink">Poderes</b>
+                <button className="pr-btn ml-auto px-2.5 py-1 text-xs" onClick={() => setPainel(null)}>
+                  ✕
+                </button>
+              </div>
+              <SkillSheet hud={hud} onAbility={doAbility} />
+              {hud.synergies.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {hud.synergies.map((sid) => {
+                    const s = SYNERGIES.find((x) => x.id === sid)
+                    if (!s) return null
+                    return (
+                      <div key={sid} className="rounded-xl border border-edge bg-ink/5 px-2.5 py-1.5">
+                        <div className="font-display text-xs font-bold text-prisma">{s.name}</div>
+                        <div className="text-[11px] text-ink-soft">{s.desc}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {hud.blessings.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {hud.blessings.map(({ id, count }) => {
+                    const b = BLESSING_BY_ID[id]
+                    if (!b) return null
+                    return (
+                      <span key={id} className="pr-chip px-2 py-1 text-[11px] text-ink-soft" title={b.desc}>
+                        {b.icon} {b.name}
+                        {count > 1 && <b className="ml-1 text-prisma">×{count}</b>}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="pr-base">
+            <button
+              className={`pr-btn pr-ilha pr-redondo ${towerCount === 0 && !painel ? 'pr-ping' : ''}`}
+              onClick={() => setPainel((v) => (v === 'build' ? null : 'build'))}
+              title="Construir [B]"
+            >
+              🔨
+            </button>
+
+            <div className="pr-vao" />
+
+            {prep ? (
+              <button className="pr-btn pr-btn-hot rounded-full px-4 py-3 text-[13px] font-bold" onClick={callWave}>
+                Chamar onda {hud.wave + 1}
+                <span className="ml-1 text-[11px]">+{Math.floor(hud.prepTimer * 4)} 🪙</span>
+              </button>
+            ) : (
+              <div className="pr-ilha px-3 py-2 text-[12px] font-bold text-ink-soft">
+                Onda {hud.wave} · {hud.enemiesLeft}
+              </div>
+            )}
+
+            <div className="pr-vao" />
+
+            <button
+              className="pr-btn pr-ilha pr-redondo"
+              onClick={() => setPainel((v) => (v === 'skills' ? null : 'skills'))}
+              title="Poderes"
+            >
+              ⚡
+              <b className="pr-act-cost text-amber">{Math.round(hud.energy)}</b>
+            </button>
+          </div>
         </div>
       </div>
 
       {toast && (
         <div
           key={toast.key}
-          className="pr-rise pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2 rounded-full border-2 border-edge bg-glass-strong px-5 py-2.5 text-sm font-bold text-ink backdrop-blur"
+          className="pr-rise pointer-events-none fixed bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-full border-2 border-edge bg-glass-strong px-5 py-2.5 text-sm font-bold text-ink backdrop-blur"
         >
           {toast.text}
         </div>
@@ -583,17 +774,17 @@ export function GameScreen({
               <Step
                 icon="💎"
                 title="O Prisma é a última cor"
-                text="É o cristal no fim da página. Toda a cor do caderno sai dele. Se a tinta encostar, ele apaga um pouco."
-              />
-              <Step
-                icon="🖋️"
-                title="A Mancha escorre pela margem"
-                text="A tinta entra pela borda da folha e escorre sempre pelo mesmo caminho, até o Prisma."
+                text="É o cristal no fim da página. Se a tinta encostar, ele apaga um pouco."
               />
               <Step
                 icon="🟩"
                 title="Você constrói nas plataformas"
-                text="Só nos quadrados com cantoneiras dá para construir. Pedra é bloqueio, e a faixa escura é por onde a tinta passa."
+                text="Só nos quadrados com cantoneiras dá para construir. Pedra bloqueia, e a faixa escura é por onde a tinta passa."
+              />
+              <Step
+                icon="🔍"
+                title="O mapa é a tela toda"
+                text="Arraste para andar pela página, pince para aproximar, e toque em ⛶ para ver tudo de uma vez."
               />
             </div>
 
@@ -611,7 +802,7 @@ export function GameScreen({
                 ))}
               </div>
               <p className="mt-2.5 text-[11px] text-ink-dim">
-                As outras cinco entram sozinhas, conforme você avança nas ondas — cada uma com a sua dica.
+                As outras cinco entram sozinhas conforme você avança nas ondas — cada uma com a sua dica.
               </p>
             </div>
 
@@ -630,6 +821,9 @@ export function GameScreen({
             <div className="mt-6 flex flex-col gap-2">
               <button className="pr-btn pr-btn-hot py-3" onClick={() => setPaused(false)}>
                 Continuar
+              </button>
+              <button className="pr-btn py-2.5 text-sm" onClick={telaCheia}>
+                Tela cheia do navegador
               </button>
               <button className="pr-btn py-2.5 text-sm" onClick={onToggleMute}>
                 Som: {muted ? 'desligado' : 'ligado'}
